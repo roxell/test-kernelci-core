@@ -810,9 +810,8 @@ device_types:
     class: arm-dtb
     boot_method: barebox
     filters:
-      - filters:
-          - blacklist:
-            - 'allmodconfig'
+      - blacklist:
+          - 'allmodconfig'
 
   snow:
     name: 'snow'
