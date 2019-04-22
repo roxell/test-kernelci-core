@@ -290,8 +290,7 @@ class Architecture(YAMLObject):
 class BuildEnvironment(YAMLObject):
     """Kernel build environment model."""
 
-    def __init__(self, name, cc, cc_version, arch_map=None,
-                 cross_compile=None):
+    def __init__(self, name, cc, cc_version, arch_map=None):
         """A build environment is a compiler and tools to build a kernel.
 
         *name* is the name of the build environment so it can be referred to in
@@ -308,15 +307,11 @@ class BuildEnvironment(YAMLObject):
                    ones used in compiler names.  For example, gcc compilers are
                    the same "x86" for both "i386" and "x86_64" kernel
                    architectures.
-
-        *cross_compile* is a dictionary mapping kernel CPU architecture names
-                        to cross-compiler prefixes.
         """
         self._name = name
         self._cc = cc
         self._cc_version = str(cc_version)
         self._arch_map = arch_map or dict()
-        self._cross_compile = cross_compile or dict()
 
     @classmethod
     def from_yaml(cls, config, name):
@@ -324,7 +319,7 @@ class BuildEnvironment(YAMLObject):
             'name': name,
         }
         kw.update(cls._kw_from_yaml(
-            config, ['name', 'cc', 'cc_version', 'arch_map', 'cross_compile']))
+            config, ['name', 'cc', 'cc_version', 'arch_map']))
         return cls(**kw)
 
     @property
@@ -341,9 +336,6 @@ class BuildEnvironment(YAMLObject):
 
     def get_arch_name(self, kernel_arch):
         return self._arch_map.get(kernel_arch, kernel_arch)
-
-    def get_cross_compile(self, kernel_arch):
-        return self._cross_compile.get(kernel_arch, '')
 
 
 class BuildVariant(YAMLObject):
@@ -368,7 +360,7 @@ class BuildVariant(YAMLObject):
                     to build with this build variant.
         """
         self._name = name
-        self._architectures = {arch.name: arch for arch in architectures}
+        self._architectures = architectures
         self._build_environment = build_environment
         self._fragments = fragments or list()
 
@@ -394,14 +386,11 @@ class BuildVariant(YAMLObject):
 
     @property
     def arch_list(self):
-        return self._architectures.keys()
+        return list(arch.name for arch in self._architectures)
 
     @property
     def architectures(self):
-        return list(self._architectures.values())
-
-    def get_arch(self, arch_name):
-        return self._architectures.get(arch_name)
+        return list(self._architectures)
 
     @property
     def build_environment(self):

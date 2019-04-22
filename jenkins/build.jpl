@@ -28,16 +28,22 @@ DEFCONFIG
   Linux kernel defconfig to build
 SRC_TARBALL
   URL of the kernel source tarball
-BUILD_CONFIG
-  Name of the build configuration
+TREE
+  URL of the kernel Git repository
+TREE_NAME
+  Name of the kernel Git repository (tree)
+BRANCH
+  Name of the kernel branch within the tree
 GIT_DESCRIBE
   Output of 'git describe' at the revision of the snapshot
 GIT_DESCRIBE_VERBOSE
   Verbose output of 'git describe' at the revision of the snapshot
 COMMIT_ID
   Git commit SHA1 at the revision of the snapshot
-BUILD_ENVIRONMENT (gcc-7)
-  Name of the build environment
+CC (gcc)
+  Name of the compiler
+CC_VERSION (7)
+  Version of the compiler
 PUBLISH (boolean)
   Publish build results via the KernelCI backend API
 EMAIL (boolean)
@@ -62,52 +68,34 @@ PARALLEL_BUILDS
 import org.kernelci.build.Kernel
 import org.kernelci.util.Job
 
-def buildConfig(kdir, kci_core) {
+def buildConfig(config, kdir, kci_core) {
+    def defconfig = sh(script: "echo ${config} | sed 's/\\+/ \\-c /g'",
+                       returnStdout: true)
+    def opt = "-i -E ${params.CC}-${params.CC_VERSION}"
+
+    if (params.PUBLISH) {
+        opt += " -e"
+    } else {
+        echo "NOT PUBLISHING"
+    }
+
     if (params.PARALLEL_BUILDS)
-        jopt = "-j${params.PARALLEL_BUILDS}"
+        opt += " -j${params.PARALLEL_BUILDS}"
 
-    dir(kci_core) {
-        sh(script: """\
-./kci_build \
-build_kernel \
---kdir=${kdir} \
---defconfig=${params.DEFCONFIG} \
---arch=${params.ARCH} \
---build-env=${params.BUILD_ENVIRONMENT} \
-${jopt} \
-""")
-
-        sh(script: """\
-./kci_build \
-install_kernel \
---kdir=${kdir} \
---defconfig=${defconfig} \
---arch=${params.ARCH} \
---config=${params.BUILD_CONFIG} \
---describe=${params.GIT_DESCRIBE} \
---describe-verbose=${params.GIT_DESCRIBE_VERBOSE} \
---commit=${params.COMMIT_ID} \
-""")
-
+    dir(kdir) {
         withCredentials([string(credentialsId: params.KCI_TOKEN_ID,
                                 variable: 'SECRET')]) {
-            sh(script: """\
-./kci_build \
-push_kernel \
---kdir=${kdir} \
---token=${SECRET} \
---api=${params.KCI_API_URL} \
-""")
-
-            sh(script: """\
-./kci_build \
-publish_kernel \
---kdir=${kdir} \
---token=${SECRET} \
---api=${params.KCI_API_URL} \
+            sh(script: """
+API=${params.KCI_API_URL} \
+TOKEN=${SECRET} \
+${kci_core}/build.py \
+  ${opt} \
+  -c ${defconfig} \
 """)
         }
     }
+
+    sh(script: """rm -rf ${kdir}""")
 }
 
 node("docker && builder") {
@@ -115,30 +103,35 @@ node("docker && builder") {
     def k = new Kernel()
     def kci_core = "${env.WORKSPACE}/kernelci-core"
     def kdir = "${env.WORKSPACE}/linux"
+    def docker_image = j.dockerImageName(
+        params.DOCKER_BASE, params.CC, params.CC_VERSION, params.ARCH)
 
     print("""\
-    Config:    ${params.BUILD_CONFIG}
+    Tree:      ${params.TREE_NAME}
+    URL:       ${params.TREE}
+    Branch:    ${params.BRANCH}
     CPU arch:  ${params.ARCH}
     Describe:  ${params.GIT_DESCRIBE}
     Revision:  ${params.COMMIT_ID}
     Config:    ${params.DEFCONFIG}
-    Compiler:  ${params.BUILD_ENVIRONMENT}""")
-
-    j.cloneKciCore(kci_core, params.KCI_CORE_URL, params.KCI_CORE_BRANCH)
-    def docker_image = j.dockerImageName(
-        kci_core, params.DOCKER_BASE, params.BUILD_ENVIRONMENT, params.ARCH)
+    Compiler:  ${params.CC} ${params.CC_VERSION}
+    Container: ${docker_image}""")
 
     j.dockerPullWithRetry(docker_image).inside() {
         stage("Init") {
             timeout(time: 30, unit: 'MINUTES') {
-                k.downloadTarball(kdir, params.SRC_TARBALL)
+                parallel(
+                    clone: { j.cloneKciCore(kci_core,
+                                            params.KCI_CORE_URL,
+                                            params.KCI_CORE_BRANCH) },
+                    download: { k.downloadTarball(kdir, params.SRC_TARBALL) },
+                )
             }
         }
 
         stage("Build") {
             timeout(time: 180, unit: 'MINUTES') {
-                buildConfig(kdir, kci_core)
-                sh(script: "rm -rf ${kdir}")
+                buildConfig(params.DEFCONFIG, kdir, kci_core)
             }
         }
     }
